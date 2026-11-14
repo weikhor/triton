@@ -380,11 +380,14 @@ class KernelInterface(Generic[T]):
 
 def serialize_specialization_data(name, signature, constants, attrs, options, key, target):
 
-    def _encode_constant(value):
+    def _encode_constant(value, nested=False):
         if value.__class__.__name__ == "dtype":
-            return str(value)
+            # Inside a tuple a plain string would be ambiguous with a str constant.
+            return {"dtype": str(value)} if nested else str(value)
         if value.__class__.__name__ == "constexpr":
-            return {"constexpr": value.value}
+            return {"constexpr": _encode_constant(value.value, nested=True)}
+        if isinstance(value, (tuple, list)):
+            return [_encode_constant(v, nested=True) for v in value]
         if isinstance(value, JITFunction):
             return {"jit_function": f"{value.module}:{value.fn.__qualname__}"}
         if isinstance(value, type):
@@ -859,12 +862,16 @@ class JITFunction(JITCallable, KernelInterface[T]):
         if target.__dict__ != deserialized_target:
             raise RuntimeError(f"Specialization data is for {deserialized_target} but trying to preload for {target}")
 
-        def _decode_constant(value):
-            if tl.dtype.is_dtype(value):
+        def _decode_constant(value, nested=False):
+            if not nested and tl.dtype.is_dtype(value):
                 return tl.dtype(value)
+            if isinstance(value, list):
+                return tuple(_decode_constant(v, nested=True) for v in value)
             if isinstance(value, dict):
+                if 'dtype' in value:
+                    return tl.dtype(value['dtype'])
                 if 'constexpr' in value:
-                    return tl.constexpr(convert_to_tuple_if_list(value['constexpr']))
+                    return tl.constexpr(_decode_constant(value['constexpr'], nested=True))
                 if 'jit_function' in value:
                     jf_key = value['jit_function']
                     if jf_key in _triton_jit_function_registry:
@@ -882,7 +889,7 @@ class JITFunction(JITCallable, KernelInterface[T]):
                     if not isinstance(cls, type):
                         raise RuntimeError(f"Expected class {class_key} for preload, got {type(cls).__name__}")
                     return cls
-            return convert_to_tuple_if_list(value)
+            return value
 
         constexprs = {key: _decode_constant(value) for key, value in zip(constant_keys, constant_vals)}
         attrs_keys = map(tuple, deserialized_obj['attrs_keys'])

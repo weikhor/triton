@@ -842,6 +842,18 @@ def test_preload_dtype_constant(monkeypatch):
     assert _preload_constants(specialization_data, monkeypatch)[(0, )] == tl.float32
 
 
+def test_preload_tuple_constants(monkeypatch):
+    constant = (tl.float16, (tl.bfloat16, _preload_function), _PreloadClass, "fp32", 3)
+    specialization_data = _serialize_constants({(0, ): constant, (1, ): tl.constexpr((tl.float32, 1))})
+    constants = _preload_constants(specialization_data, monkeypatch)
+    assert constants[(0, )] == constant
+    assert isinstance(constants[(0, )][0], tl.dtype)
+    assert constants[(0, )][1][1] is _preload_function
+    assert constants[(0, )][3] == "fp32"
+    assert isinstance(constants[(1, )], tl.constexpr)
+    assert constants[(1, )].value == (tl.float32, 1)
+
+
 def test_preload_registered_local_function(monkeypatch):
 
     @triton.jit
