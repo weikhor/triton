@@ -333,6 +333,26 @@ def test_unknown_key_name_is_rejected():
             )
 
 
+def test_heuristic_key_name_is_rejected():
+    # A name computed by an inner @triton.heuristics is a kernel argument, but it is
+    # only set after the tuning key is built, so it used to be dropped from the key and
+    # the config tuned for one heuristic value was reused for every other value.
+    def make(key):
+
+        @triton.autotune(configs=[triton.Config({"CHUNK": 8})], key=key)
+        @triton.heuristics({"BLOCK": lambda args: triton.next_power_of_2(args["n"])})
+        @triton.jit
+        def kernel(x_ptr, n, BLOCK: tl.constexpr, CHUNK: tl.constexpr):
+            pass
+
+        return kernel
+
+    with pytest.raises(ValueError, match="computed by an inner @triton.heuristics: BLOCK"):
+        make(["BLOCK"])
+    # Keying on the argument the heuristic reads is still allowed.
+    make(["n"])
+
+
 def test_restore_value_with_user_pre_hook():
     # A user-supplied pre_hook replaces the default one that populates restore_copies,
     # but the default post_hook that reads it stays installed, so running the autotuner

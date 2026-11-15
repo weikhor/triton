@@ -56,6 +56,21 @@ class Autotuner(KernelInterface):
                 raise ValueError(f"{param} contains names that are not kernel arguments: "
                                  f"{', '.join(unknown)}. Valid argument names are: {', '.join(self.arg_names)}.")
 
+        # A name set by an inner `@triton.heuristics` only gets its value in
+        # `Heuristics.run`, after `run()` has built the tuning key, so it would be
+        # dropped from the key in the same way.
+        heuristic_names = set()
+        inner = fn
+        while not inspect.isfunction(inner) and hasattr(inner, "fn"):
+            if isinstance(inner, Heuristics):
+                heuristic_names.update(inner.values)
+            inner = inner.fn
+        computed = [name for name in self.keys if name in heuristic_names]
+        if computed:
+            raise ValueError(f"key contains names computed by an inner @triton.heuristics: {', '.join(computed)}. "
+                             "Their values are not known when the tuning key is built; use the arguments "
+                             "the heuristics read instead.")
+
         # Populated by the default pre_hook when `restore_value` is set. Initialized here
         # because a user-supplied pre_hook replaces that default while the default
         # post_hook, which reads this, stays installed.
